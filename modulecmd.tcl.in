@@ -20,6 +20,25 @@
 
 ##########################################################################
 
+global ::env
+
+if {[info exists ::env(TCLTRACE)]} {
+
+set _XXXTrace_fd [open "tcltrace.txt" w]
+fconfigure $_XXXTrace_fd -buffering line
+
+proc _XXXtrace {cmd type} {
+   puts $::_XXXTrace_fd "[info level] $cmd"
+}
+
+rename proc _proc
+_proc proc {name arglist body} {
+     uplevel [list _proc $name $arglist $body]
+     uplevel trace add execution $name enter _XXXtrace
+}
+
+}
+
 #
 # Some Global Variables.....
 #
