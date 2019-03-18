@@ -64,12 +64,14 @@ proc isWin {} {
 }
 
 # Get default path separator
-proc getPathSeparator {} {
-   if {![info exists ::g_def_separator]} {
-      set ::g_def_separator [expr {[isWin] ? {;} : {:}}]
+proc getPathSeparator { {path {}} } {
+   if {$path == {}} {
+      return [expr {[isWin] ? {;} : {:}}]
+   } elseif {[ regexp {^[A-Za-z]:[\\/]} $path ]} {
+      return ";"
+   } else {
+      return ":"
    }
-
-   return $::g_def_separator
 }
 
 # Sub level separator to serialize a second level of info in env var
@@ -697,8 +699,12 @@ proc nimp {cmd args} {
 }
 
 proc get-env {var {valifunset {}}} {
+   global ::env
+
    # return current value if exists and not cleared
-   if {[info exists ::env($var)] && ![info exists ::g_clearedEnvVars($var)]} {
+   if {[info exists ::env($var)] && \
+      ![info exists ::g_clearedEnvVars($var)] && \
+       [array get env $var] != ""} {
       return $::env($var)
    } else {
       return $valifunset
@@ -2136,11 +2142,12 @@ proc putsModfileCmd {itrp args} {
 # path fiddling
 #
 proc getReferenceCountArray {var separator} {
+   global ::env
    # get reference counter set in environment
    set sharevar [getModshareVarName $var]
    array set refcount {}
    if {[info exists ::env($sharevar)]} {
-      set modsharelist [psplit $::env($sharevar) [getPathSeparator]]
+      set modsharelist [separatePathList $::env($sharevar)]
       # ignore environment ref count variable if malformed
       if {([llength $modsharelist] % 2) == 0} {
          array set refcount $modsharelist
@@ -2158,7 +2165,7 @@ proc getReferenceCountArray {var separator} {
       if {$::env($var) eq {} && [info exists refcount()]} {
          lappend eltlist {}
       } else {
-         set eltlist [split $::env($var) $separator]
+         set eltlist [separatePathList $::env($var)]
       }
 
       # just go thought the elements of the variable, which means additional
@@ -2210,7 +2217,10 @@ proc unload-path {args} {
 
    # build list of index to remove from variable
    set del_idx_list [list]
-   foreach dir $path_list {
+   foreach dir_ $path_list {
+      set path_like [expr {$dir_list == "" ? $dir_ : $dir_list}]
+      set dir [path_to_type $dir_ [path_type $path_like]]
+
       # retrieve dir value if working on an index list
       if {$idx_val} {
          set idx $dir
@@ -2307,7 +2317,10 @@ proc add-path {pos args} {
 
    set val [get-env $var]
 
-   foreach dir $path_list {
+   foreach dir_ $path_list {
+      set path_like [expr {$val == "" ? $dir_ : $val}]
+      set dir [path_to_type $dir_ [path_type $path_like]]
+      reportDebug "dir: $dir"
       if {![info exists countarr($dir)] || $allow_dup} {
          # ignore env var set empty if no empty entry found in reference
          # counter array (sometimes var is cleared by setting it empty not
@@ -2377,7 +2390,9 @@ proc parsePathCommandArgs {cmd args} {
 
    # adapt with default value or raise error if some arguments are missing
    if {![info exists delim]} {
-      set delim [getPathSeparator]
+      set val [get-env $var]
+      set path_like [expr {$val == "" ? $val_raw_list : $val}]
+      set delim [getPathSeparator $path_like] 
    } elseif {$delim eq {}} {
       error "$cmd should get a non-empty path delimiter"
    }
@@ -4313,6 +4328,58 @@ proc restoreSettings {} {
    }
 }
 
+
+proc path_type { path } {
+  if {[ regexp {^\{?[A-Za-z]:\\} $path]} {
+    return dos
+  } elseif {[ regexp {^[A-Za-z]:/} $path]} {
+    return mixed
+  } else {
+    return unix
+  }
+}
+
+proc path_to_unix {path}  {
+  return [string map {\\ /} [subst -nobackslashes -novariables [
+    regsub -all {^([A-Za-z]):[\\/]} $path {/[string tolower {\1}]/}
+  ]]]
+}
+
+proc path_to_mixed {path}  {
+  return [string map {\\ /} [subst -nobackslashes -novariables [
+    regsub -all {^/([A-Za-z])/} $path {[string toupper {\1}]:/}
+  ]]]
+}
+
+proc path_to_dos {path} {
+  return [string map {/ \\} [subst -nobackslashes -novariables [
+    regsub -all {^/([A-Za-z])/} $path {[string toupper {\1}]:\\}
+  ]]]
+}
+
+proc path_to_type {path ptype} {
+   switch -- $ptype {
+      dos {
+         return [path_to_dos $path]
+      }
+      mixed {
+         return [path_to_mixed $path]
+      }
+      default {
+         return [path_to_unix $path]
+      }
+   }
+   return $path
+}
+
+proc renderPathString {pathstring} {
+   set pathlist {}
+   foreach path [separatePathList "$pathstring"] {
+      lappend pathlist [path_to_unix $path]
+   }
+   return [pjoin $pathlist {:}]
+}
+
 proc renderSettings {} {
    global g_stateEnvVars g_stateAliases g_stateFunctions g_newXResources\
       g_delXResources
@@ -4367,7 +4434,8 @@ proc renderSettings {} {
                   puts stdout "setenv $var $val;"
                }
                sh {
-                  puts stdout "$var=[charEscaped $::env($var)];\
+                  set val [renderPathString $::env($var)]
+                  puts stdout "$var=[charEscaped $val];\
                      export $var;"
                }
                fish {
@@ -5380,6 +5448,18 @@ proc parseAccessIssue {modfile} {
       return "Cannot access '$modfile'"
    }
 }
+
+# Make a tcl list out of a list of windows-like paths separated by
+# semicolons or unix-like paths separated by colons.
+proc separatePathList { pathlist } {
+  if {[ regexp {^[A-Za-z]:[\\/]} $pathlist ]} {
+    set delim ";"
+  } else {
+    set delim ":"
+  }
+  return [split $pathlist $delim]
+}
+
 
 proc checkValidModule {modfile} {
    reportDebug $modfile
@@ -8124,7 +8204,7 @@ Options:
 
 ########################################################################
 # main program
-
+if { ![info exists ::env(MODULE_IMPORT)] } {
 # needed on a gentoo system. Shouldn't hurt since it is
 # supposed to be the default behavior
 fconfigure stderr -translation auto
@@ -8297,6 +8377,8 @@ if {[catch {
 }
 
 cleanupAndExit 0
+
+}
 
 # ;;; Local Variables: ***
 # ;;; mode:tcl ***
