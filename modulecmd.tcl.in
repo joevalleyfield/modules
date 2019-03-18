@@ -31,10 +31,15 @@ proc _XXXtrace {cmd type} {
    puts $::_XXXTrace_fd "[info level] $cmd"
 }
 
+proc _XXXtrace_exit {cmd code result type} {
+   puts $::_XXXTrace_fd "[info level] $cmd -> $code -- $result"
+}
+
 rename proc _proc
 _proc proc {name arglist body} {
      uplevel [list _proc $name $arglist $body]
      uplevel trace add execution $name enter _XXXtrace
+     uplevel trace add execution $name leave _XXXtrace_exit
 }
 
 }
