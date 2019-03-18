@@ -712,6 +712,7 @@ proc get-env {var {valifunset {}}} {
 }
 
 proc set-env {var val} {
+   if { $val == {} } { return }
    set mode [currentMode]
    reportDebug "$var=$val"
    set ::env($var) $val
@@ -827,6 +828,7 @@ x-resource     {x-resource     x-resource     reportCmd      nop            nop 
 }
 
 proc execute-modulefile {modfile modname modspec {must_have_cookie 1}} {
+   set modfile [path_to_tcl $modfile]
    pushModuleFile $modfile
    pushModuleName $modname
    pushSpecifiedName $modspec
@@ -2951,7 +2953,7 @@ proc getUnloadingModuleList {} {
 # return list of loaded modules by parsing LOADEDMODULES env variable
 proc getLoadedModuleList {{filter_empty 1}} {
    set modlist [list]
-   foreach mod [split [get-env LOADEDMODULES] [getPathSeparator]] {
+   foreach mod [separatePathList [get-env LOADEDMODULES]] {
       # ignore empty element
       if {$mod ne {} || !$filter_empty} {
          lappend modlist $mod
@@ -4372,6 +4374,10 @@ proc path_to_type {path ptype} {
    return $path
 }
 
+proc path_to_tcl {path} {
+  return [path_to_type $path [path_type [file normalize .]]]
+}
+
 proc renderPathString {pathstring} {
    set pathlist {}
    foreach path [separatePathList "$pathstring"] {
@@ -5452,7 +5458,8 @@ proc parseAccessIssue {modfile} {
 # Make a tcl list out of a list of windows-like paths separated by
 # semicolons or unix-like paths separated by colons.
 proc separatePathList { pathlist } {
-  if {[ regexp {^[A-Za-z]:[\\/]} $pathlist ]} {
+  if {[ regexp {^[A-Za-z]:[\\/]} $pathlist ] ||
+      ( [ regexp {;} $pathlist ] && ![ regexp {:} $pathlist ] ) } {
     set delim ";"
   } else {
     set delim ":"
@@ -7882,6 +7889,10 @@ proc cmdModuleUnuse {args} {
    }
 }
 
+proc envvar_exists { var } {
+   return [expr {[array names env -exact $var] == $var}]
+}
+
 proc cmdModuleAutoinit {} {
    reportDebug called.
 
@@ -7927,7 +7938,7 @@ proc cmdModuleAutoinit {} {
    }
 
    # source initialization modulerc if any and if no env already initialized
-   if {$::env(MODULEPATH) eq {} && $::env(LOADEDMODULES) eq {}\
+   if {$::env(MODULEPATH) eq {} && ![envvar_exists LOADEDMODULES] \
       && [file exists @initdir@/modulerc]} {
       cmdModuleSource @initdir@/modulerc
    }
