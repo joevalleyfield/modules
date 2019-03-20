@@ -2145,6 +2145,17 @@ proc putsModfileCmd {itrp args} {
    }
 }
 
+proc format_list_like_envvar {thelist envvar} {
+   set val [array get env $envvar]
+   set path_like [expr {$val == "" ? $thelist : $val}]
+   set type [path_type $path_like]
+   set newlist {}
+   foreach { p c } $thelist {
+      lappend newlist [path_to_type $p $type] $c
+   }
+   return $newlist
+}
+
 ########################################################################
 # path fiddling
 #
@@ -2157,6 +2168,9 @@ proc getReferenceCountArray {var separator} {
       set modsharelist [separatePathList $::env($sharevar)]
       # ignore environment ref count variable if malformed
       if {([llength $modsharelist] % 2) == 0} {
+         # make the refcount list use the same path format as the main var
+         set modsharelist [format_list_like_envvar $modsharelist $var]
+
          array set refcount $modsharelist
       } else {
          reportDebug "Reference counter value in '$sharevar' is malformed\
@@ -2216,7 +2230,8 @@ proc unload-path {args} {
    }
 
    # save initial variable content to match index arguments
-   set dir_list [split [get-env $var] $separator]
+   #set dir_list [split [get-env $var] $separator]
+   set dir_list [separatePathList [get-env $var]]
    # detect if empty env value means empty path entry
    if {[llength $dir_list] == 0 && [info exists countarr()]} {
       lappend dir_list {}
@@ -2236,7 +2251,7 @@ proc unload-path {args} {
          if {$idx < 0 || $idx >= [llength $dir_list]} {
             continue
          } else {
-            set dir [lindex $dir_list $idx]
+            set dir [path_to_type [lindex $dir_list $idx] [path_type $path_like]]
          }
       }
 
@@ -2251,6 +2266,8 @@ proc unload-path {args} {
          set newcount 0
       }
 
+      reportDebug "lsearch -all -exact $dir_list $dir"
+      reportDebug "[lsearch -all -exact $dir_list $dir]"
       # get all entry indexes corresponding to dir
       set found_idx_list [lsearch -all -exact $dir_list $dir]
 
@@ -2328,6 +2345,8 @@ proc add-path {pos args} {
       set path_like [expr {$val == "" ? $dir_ : $val}]
       set dir [path_to_type $dir_ [path_type $path_like]]
       reportDebug "dir: $dir"
+      set separator [getPathSeparator $path_like] 
+
       if {![info exists countarr($dir)] || $allow_dup} {
          # ignore env var set empty if no empty entry found in reference
          # counter array (sometimes var is cleared by setting it empty not
@@ -2397,9 +2416,11 @@ proc parsePathCommandArgs {cmd args} {
 
    # adapt with default value or raise error if some arguments are missing
    if {![info exists delim]} {
-      set val [get-env $var]
-      set path_like [expr {$val == "" ? $val_raw_list : $val}]
+      set varval [get-env $var]
+      set path_like [expr {$varval == "" ? $val_raw_list : $varval}]
+      reportDebug "varval: $varval -- val_raw_list: $val_raw_list"
       set delim [getPathSeparator $path_like] 
+
    } elseif {$delim eq {}} {
       error "$cmd should get a non-empty path delimiter"
    }
@@ -2434,10 +2455,13 @@ proc parsePathCommandArgs {cmd args} {
          }
    }
 
-   reportDebug "(delim=$delim, allow_dup=$allow_dup, idx_val=$idx_val,\
+   set path_like [expr {$val == "" ? $val_raw_list : $val}]
+   set returndelim [getPathSeparator $path_like] 
+
+   reportDebug "(delim=$returndelim, allow_dup=$allow_dup, idx_val=$idx_val,\
       var=$var, val=$val_list, nbval=[llength $val_list])"
 
-   return [list $delim $allow_dup $idx_val $var $val_list]
+   return [list $returndelim $allow_dup $idx_val $var $val_list]
 }
 
 proc prepend-path {args} {
@@ -3100,9 +3124,9 @@ proc sortModulePerLoadedAndDepOrder {modlist {nporeq 0} {loading 0}} {
 # set_abs param applies an absolute path name convertion to path elements
 # if enabled
 proc getModulePathList {{behavior returnempty} {resolv_var 1} {set_abs 1}} {
-   if {[info exists ::env(MODULEPATH)]} {
+   if {[info exists ::env(MODULEPATH)] != ""} {
       set modpathlist [list]
-      foreach modpath [split $::env(MODULEPATH) [getPathSeparator]] {
+      foreach modpath [separatePathList [ lindex [array get ::env MODULEPATH] 1 ]] {
          # ignore empty element
          if {$modpath ne {}} {
             if {$resolv_var} {
@@ -4360,8 +4384,9 @@ proc path_to_mixed {path}  {
 
 proc path_to_dos {path} {
   return [string map {/ \\} [subst -nobackslashes -novariables [
-    regsub -all {^/([A-Za-z])/} $path {[string toupper {\1}]:\\}
-  ]]]
+    regsub -all {^([A-Za-z]):[\\/]} [ 
+    regsub -all {^/([A-Za-z])/} $path {[string toupper {\1}]:\\} 
+    ] {[string toupper {\1}]:\\} ]]]
 }
 
 proc path_to_type {path ptype} {
@@ -5317,7 +5342,7 @@ proc getAbsolutePath {path} {
    }
 
    # return cleaned absolute path
-   return $abspath
+   return [path_to_tcl $abspath]
 }
 
 # split string while ignore any separator character that is espaced
@@ -5403,6 +5428,10 @@ if {[info commands lassign] eq {}} {
 }
 
 proc isInList {lst elt} {
+   set path_like [expr {$lst == "" ? $elt : $lst}]
+   set elt [path_to_type $elt [path_type $path_like]]
+
+   reportDebug \"$elt\"
    return [expr {[lsearch -exact $lst $elt] != -1}]
 }
 
@@ -6382,7 +6411,7 @@ proc pinVersionInCollection {} {
 # enabled collection target if any set.
 proc findCollections {} {
    if {[info exists ::env(HOME)]} {
-      set coll_search $::env(HOME)/.module/*
+      set coll_search [path_to_tcl $::env(HOME)/.module/*]
    } else {
       reportErrorAndExit {HOME not defined}
    }
