@@ -2145,7 +2145,7 @@ proc putsModfileCmd {itrp args} {
    }
 }
 
-proc format_list_like_envvar {thelist envvar} {
+proc format_share_list_like_envvar {thelist envvar} {
    set val [array get env $envvar]
    set path_like [expr {$val == "" ? $thelist : $val}]
    set type [path_type $path_like]
@@ -2169,7 +2169,7 @@ proc getReferenceCountArray {var separator} {
       # ignore environment ref count variable if malformed
       if {([llength $modsharelist] % 2) == 0} {
          # make the refcount list use the same path format as the main var
-         set modsharelist [format_list_like_envvar $modsharelist $var]
+         set modsharelist [format_share_list_like_envvar $modsharelist $var]
 
          array set refcount $modsharelist
       } else {
@@ -2314,6 +2314,10 @@ proc unload-path {args} {
    if {[llength $newpath] == 0} {
       unset-env $var
    } else {
+      set dir [lindex $dir_list 0]
+      set path_like [expr {$dir == "" ? $path_list : $dir}]
+      set separator [getPathSeparator $path_like] 
+
       set-env $var [join $newpath $separator]
    }
 
@@ -2455,7 +2459,7 @@ proc parsePathCommandArgs {cmd args} {
          }
    }
 
-   set path_like [expr {$val == "" ? $val_raw_list : $val}]
+   set path_like [expr {$val_raw_list == "" ? $val: $val_raw_list }]
    set returndelim [getPathSeparator $path_like] 
 
    reportDebug "(delim=$returndelim, allow_dup=$allow_dup, idx_val=$idx_val,\
