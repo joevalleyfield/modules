@@ -4951,13 +4951,13 @@ if ( ! \$?histchars && ! \$?prompt ) alias module '$eval_cmd' ;"
 @quarantinesupport@      fi;
 @quarantinesupport@   done;
 @quarantinesupport@   if [ -n "${_mlre:-}" ]; then}
-@quarantinesupport@         append fdef "\n      eval `eval \${${wsplit}_mlre}$tclshbin $::argv0\
+@quarantinesupport@         append fdef "\n      eval `eval \${${wsplit}_mlre}[charEscaped [path_to_unix $tclshbin]] [charEscaped [path_to_unix $::argv0]]\
 @quarantinesupport@$::g_shell '\"\$@\"'`;
 @quarantinesupport@   else
-@quarantinesupport@      eval `$tclshbin $::argv0 $::g_shell \"\$@\"`;
+@quarantinesupport@      eval `[charEscaped [path_to_unix $tclshbin]] [charEscaped [path_to_unix $::argv0]] $::g_shell \"\$@\"`;
 @quarantinesupport@   fi;"
 @notquarantinesupport@         append fdef "
-@notquarantinesupport@   eval `$tclshbin $::argv0 $::g_shell \"\$@\"`;"
+@notquarantinesupport@   eval `[charEscaped [path_to_unix $tclshbin]] [charEscaped [path_to_unix $::argv0]] $::g_shell \"\$@\"`;"
          append fdef {
    _mlstatus=$?;}
 @quarantinesupport@         append fdef {
